@@ -33,7 +33,6 @@ var (
 )
 
 var lazyInit = map[string]any{
-	EnvFeishuUserAccessToken:     &feishuUserAccessToken,
 	EnvFeishuAppSecret:           &feishuAppSecret,
 	EnvGithubPersonalAccessToken: &githubPersonalAccessToken,
 }
