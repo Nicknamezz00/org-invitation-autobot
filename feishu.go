@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
@@ -20,9 +21,53 @@ const (
 )
 
 var (
-	feishuUserAccessToken string
-	feishuAppSecret       string
+	feishuAppSecret string
 )
+
+func acquireFeishuTenantAccessToken() (string, error) {
+	url := "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+
+	payload, err := json.Marshal(map[string]any{
+		"app_id":     feishuAppID,
+		"app_secret": feishuAppSecret,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal payload error||err=%w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(string(payload)))
+	if err != nil {
+		return "", fmt.Errorf("new request error||err=%w", err)
+	}
+	req.Header.Add("Content-Type", "application/json; charset=utf-8")
+	req.Header.Add("Host", "open.feishu.cn")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("do request error||err=%w", err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", fmt.Errorf("read body error||err=%w", err)
+	}
+
+	type APIResponse struct {
+		Code              int    `json:"code"`
+		Expire            int    `json:"expire"`
+		Msg               string `json:"msg"`
+		TenantAccessToken string `json:"tenant_access_token"`
+	}
+	var resp APIResponse
+	if err = json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("bind response error||resp=%s||err=%w", string(body), err)
+	}
+	if resp.Code != 0 {
+		return "", fmt.Errorf("response code non-zero||resp=%s||err=%w", string(body), err)
+	}
+	return resp.TenantAccessToken, nil
+}
 
 // SDK 使用文档：https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/server-side-sdk/golang-sdk-guide/preparations
 // 复制该 Demo 后, 需要将 "YOUR_APP_ID", "YOUR_APP_SECRET" 替换为自己应用的 APP_ID, APP_SECRET.
@@ -32,8 +77,12 @@ func GetSheets() (*larksheets.QuerySpreadsheetSheetResp, error) {
 	req := larksheets.NewQuerySpreadsheetSheetReqBuilder().
 		SpreadsheetToken(feishuSpreadsheet).
 		Build()
-	opts := larkcore.WithUserAccessToken(feishuUserAccessToken)
 
+	feishuTenantAccessToken, err := acquireFeishuTenantAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("error acquiring tenant access token||err=%w", err)
+	}
+	opts := larkcore.WithTenantAccessToken(feishuTenantAccessToken)
 	resp, err := client.Sheets.V3.SpreadsheetSheet.Query(context.Background(), req, opts)
 	if err != nil {
 		fmt.Println(err)
@@ -72,7 +121,11 @@ func SheetRangeContent(start, end string) ([][]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", feishuUserAccessToken))
+	feishuTenantAccessToken, err := acquireFeishuTenantAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("error acquiring tenant access token||err=%w", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", feishuTenantAccessToken))
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 
 	resp, err := http.DefaultClient.Do(req)
