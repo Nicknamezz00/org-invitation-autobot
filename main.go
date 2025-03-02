@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"reflect"
 	"strings"
 
+	"github.com/sirupsen/logrus"
+
+	"github.com/Nicknamezz00/org-invitation-autobot/store"
 	"github.com/Nicknamezz00/org-invitation-autobot/store/generate/model"
 	"github.com/Nicknamezz00/org-invitation-autobot/store/generate/query"
 	"github.com/google/uuid"
@@ -20,10 +22,10 @@ import (
 
 const (
 	// SENSITIVE environment variables below:
-	EnvFeishuUserAccessToken     = "FEISHU_USER_ACCESS_TOKEN"
 	EnvFeishuAppSecret           = "FEISHU_APP_SECRET"
 	EnvGithubPersonalAccessToken = "GITHUB_PERSONAL_ACCESS_TOKEN"
 
+	InvitationStatusPending   = "PENDING"
 	InvitationStatusSucceeded = "SUCCEEDED"
 	InvitationStatusFailed    = "FAILED"
 )
@@ -39,15 +41,18 @@ var lazyInit = map[string]any{
 
 func init() {
 	if err := MustGetEnvs(); err != nil {
-		log.Fatalln(err)
+		logrus.Fatalln(err)
 	}
+	logrus.SetFormatter(&logrus.JSONFormatter{
+		PrettyPrint: true,
+	})
 
 	viper.SetConfigFile("config/config.yaml")
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("env")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // e.g. app.port -> APP_PORT
 	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalln(err)
+		logrus.Fatalln(err)
 	}
 }
 
@@ -61,6 +66,9 @@ func invite(w http.ResponseWriter, r *http.Request) {
 		}
 	)
 	defer func() {
+		//if r := recover(); r != nil {
+		//	http.Error(w, fmt.Sprintf("%v", r), http.StatusInternalServerError)
+		//}
 		if err != nil {
 			http.Error(w, err.Error(), statusCode)
 		}
@@ -94,39 +102,59 @@ func invite(w http.ResponseWriter, r *http.Request) {
 		orderID := cast.ToInt64(content[0])
 		githubName := cast.ToString(content[1])
 		githubEmail := cast.ToString(content[2])
-		if inviteErr := InviteWrapper(orderID, githubName, githubEmail); inviteErr != nil {
-			log.Printf("invite_error||err=%v||orderID=%d||githubName=%s||githubEmail=%s\n", err, orderID, githubName, githubEmail)
+		if inviteErr := InviteWrapper(r.Context(), orderID, githubName, githubEmail); inviteErr != nil {
+			logrus.WithError(inviteErr).WithFields(logrus.Fields{
+				"orderID":     orderID,
+				"githubName":  githubName,
+				"githubEmail": githubEmail,
+			}).Error("invite_error")
 		}
 	}
+
 }
 
 func main() {
+	db := store.New(viper.GetViper())
+	query.SetDefault(db)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/invite", invite)
-	log.Println("HTTP Server listening :8182")
-	log.Fatal(http.ListenAndServe(":8182", mux))
+	logrus.Println("HTTP Server listening :8182")
+	logrus.Fatalln(http.ListenAndServe(":8182", mux))
 }
 
-func InviteWrapper(orderID int64, username, email string) (err error) {
+func InviteWrapper(ctx context.Context, orderID int64, username, email string) (err error) {
+	create := model.InvitationModel{
+		ID:               uuid.New().String(),
+		OrderID:          orderID,
+		GithubUsername:   username,
+		GithubEmail:      email,
+		InvitationStatus: InvitationStatusPending,
+	}
+	if err = query.InvitationModel.WithContext(ctx).Create(&create); err != nil {
+		return fmt.Errorf("create_error||err=%v||create=%+v", err, create)
+	}
 	defer func() {
-		status := InvitationStatusSucceeded
+		var (
+			cause  string
+			status = InvitationStatusSucceeded
+		)
 		if err != nil {
+			cause = err.Error()
 			status = InvitationStatusFailed
+			if errors.Unwrap(err) != nil {
+				cause = errors.Unwrap(err).Error()
+			}
 		}
-
-		create := model.InvitationModel{
-			ID:               uuid.New().String(),
-			OrderID:          orderID,
-			GithubUsername:   username,
-			GithubEmail:      email,
-			InvitationStatus: status,
-			FirstError:       err.Error(),
-		}
-		if dbErr := query.InvitationModel.WithContext(context.Background()).Create(&create); dbErr != nil {
-			log.Println("DB Error||err=%v||create=%+v", err, create)
+		if _, err2 := query.InvitationModel.WithContext(ctx).
+			Where(query.InvitationModel.ID.Eq(create.ID)).
+			UpdateColumnSimple(
+				query.InvitationModel.InvitationStatus.Value(status),
+				query.InvitationModel.FirstError.Value(cause),
+			); err2 != nil {
+			logrus.WithField("create", create).WithError(err2).Error("_db_create_error")
 		}
 	}()
-
 	if !purchase(orderID) {
 		return fmt.Errorf("not purchased||orderID=%d||name=%s||email=%s")
 	}

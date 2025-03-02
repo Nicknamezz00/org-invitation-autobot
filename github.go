@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	"github.com/sirupsen/logrus"
 )
 
 func Invite(username, email string) error {
@@ -40,8 +41,8 @@ func Invite(username, email string) error {
 	}
 
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("[MUST NOTICE] req=%+v||json=%v||code=%v||resp=%s", req, string(jsonData), resp.StatusCode, string(bytes))
+		return fmt.Errorf("[MUST NOTICE]||req=%+v||json=%v||code=%v||resp=%s", req, string(jsonData), resp.StatusCode, string(bytes))
 	}
-	log.Println(string(bytes))
+	logrus.Println(string(bytes))
 	return nil
 }

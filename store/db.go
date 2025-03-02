@@ -5,13 +5,18 @@ import (
 	"log"
 	"strings"
 
+	"github.com/Nicknamezz00/org-invitation-autobot/store/generate/query"
 	"github.com/spf13/viper"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
+var (
+	PostgresDB *gorm.DB
+)
+
 func init() {
-	viper.SetConfigFile("../../config/config.yaml")
+	viper.SetConfigFile("config/config.yaml")
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("env")
 	if err := viper.ReadInConfig(); err != nil {
@@ -23,7 +28,12 @@ func New(v *viper.Viper) *gorm.DB {
 	if v == nil {
 		panic("nil viper")
 	}
-	return connectPostgreSQL(v.Sub("postgres"))
+	PostgresDB = connectPostgreSQL(v.Sub("postgres"))
+	if PostgresDB == nil {
+		panic("nil pg")
+	}
+	query.SetDefault(PostgresDB)
+	return PostgresDB
 }
 
 func connectPostgreSQL(v *viper.Viper) *gorm.DB {
