@@ -13,6 +13,8 @@ import (
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larksheets "github.com/larksuite/oapi-sdk-go/v3/service/sheets/v3"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cast"
 )
 
 const (
@@ -106,7 +108,13 @@ func FirstSheet(resp *larksheets.QuerySpreadsheetSheetResp) (string, error) {
 	return *resp.Data.Sheets[0].SheetId, nil
 }
 
-func SheetRangeContent(start, end string) ([][]any, error) {
+type Range struct {
+	OrderID        int64
+	GithubUsername string
+	GithubEmail    string
+}
+
+func SheetRangeContent(start, end string) ([]Range, error) {
 	sheets, err := GetSheets()
 	if err != nil {
 		return nil, err
@@ -134,7 +142,7 @@ func SheetRangeContent(start, end string) ([][]any, error) {
 	}
 	bytes, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
-	log.Println(larkcore.Prettify(string(bytes)))
+	logrus.Println(larkcore.Prettify(string(bytes)))
 
 	type APIResponse struct {
 		Data struct {
@@ -148,5 +156,42 @@ func SheetRangeContent(start, end string) ([][]any, error) {
 		return nil, err
 	}
 
-	return apiResponse.Data.ValueRange.Values, nil
+	return parseContent(apiResponse.Data.ValueRange.Values)
+}
+
+func parseContent(values [][]any) (r []Range, err error) {
+	for _, v := range values {
+		data := Range{
+			OrderID:        cast.ToInt64(v[0]),
+			GithubUsername: cast.ToString(v[1]),
+		}
+		if _, err = cast.ToStringE(v[2]); err == nil {
+			data.GithubEmail = cast.ToString(v[2])
+		} else {
+			type CellValue struct {
+				Link string `json:"link"`
+				Text string `json:"text"`
+				Type string `json:"type"`
+			}
+			cellData, ok := v[2].([]interface{})
+			if !ok || len(cellData) == 0 {
+				return nil, fmt.Errorf("invalid cell data format")
+			}
+			cellMap, ok := cellData[0].(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("invalid cell map format")
+			}
+			cellBytes, err := json.Marshal(cellMap)
+			if err != nil {
+				return nil, fmt.Errorf("marshal cell map error, err=%v", err)
+			}
+			var cell CellValue
+			if err = json.Unmarshal(cellBytes, &cell); err != nil {
+				return nil, fmt.Errorf("unmarshal cell error, err=%v", err)
+			}
+			data.GithubEmail = cell.Text
+		}
+		r = append(r, data)
+	}
+	return r, nil
 }

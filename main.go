@@ -11,12 +11,12 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/Nicknamezz00/org-invitation-autobot/store"
 	"github.com/Nicknamezz00/org-invitation-autobot/store/generate/model"
 	"github.com/Nicknamezz00/org-invitation-autobot/store/generate/query"
 	"github.com/google/uuid"
-	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 )
 
@@ -94,14 +94,14 @@ func invite(w http.ResponseWriter, r *http.Request) {
 	contents, err := SheetRangeContent(rng.Start, rng.End)
 	if err != nil {
 		statusCode = http.StatusOK
-		err = fmt.Errorf("sheetRangeContent error, err=%w", err)
+		err = fmt.Errorf("sheetRangeContent error, err=%w", err, contents)
 		return
 	}
 
 	for _, content := range contents {
-		orderID := cast.ToInt64(content[0])
-		githubName := cast.ToString(content[1])
-		githubEmail := cast.ToString(content[2])
+		orderID := content.OrderID
+		githubName := content.GithubUsername
+		githubEmail := content.GithubEmail
 		if inviteErr := InviteWrapper(r.Context(), orderID, githubName, githubEmail); inviteErr != nil {
 			logrus.WithError(inviteErr).WithFields(logrus.Fields{
 				"orderID":     orderID,
@@ -124,16 +124,34 @@ func main() {
 }
 
 func InviteWrapper(ctx context.Context, orderID int64, username, email string) (err error) {
-	create := model.InvitationModel{
+	create := &model.InvitationModel{
 		ID:               uuid.New().String(),
 		OrderID:          orderID,
 		GithubUsername:   username,
 		GithubEmail:      email,
 		InvitationStatus: InvitationStatusPending,
 	}
-	if err = query.InvitationModel.WithContext(ctx).Create(&create); err != nil {
-		return fmt.Errorf("create_error||err=%v||create=%+v", err, create)
+	old, err := query.InvitationModel.WithContext(ctx).Or(
+		query.InvitationModel.GithubUsername.Eq(username),
+		query.InvitationModel.GithubEmail.Eq(email)).
+		First()
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("find_old_record_error||err=%v", err)
 	}
+
+	if old == nil {
+		if err = query.InvitationModel.WithContext(ctx).Create(create); err != nil {
+			return fmt.Errorf("create_error||err=%v||create=%+v", err, create)
+		}
+	} else {
+		create.ID = old.ID
+		create.OrderID = old.OrderID
+		create.GithubUsername = old.GithubUsername
+		create.GithubEmail = old.GithubEmail
+		create.InvitationStatus = old.InvitationStatus
+		create.FirstError = old.FirstError
+	}
+
 	defer func() {
 		var (
 			cause  string
