@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 
 	"github.com/Nicknamezz00/org-invitation-autobot/store"
@@ -117,6 +118,11 @@ func main() {
 	db := store.New(viper.GetViper())
 	query.SetDefault(db)
 
+	c := cron.New()
+	c.AddFunc("0 9 * * *", func() { callInviteEndpoint() })
+	c.AddFunc("0 21 * * *", func() { callInviteEndpoint() })
+	c.Start()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/invite", invite)
 	logrus.Println("HTTP Server listening :8182")
@@ -191,4 +197,17 @@ func MustGetEnvs() (err error) {
 		}
 	}
 	return nil
+}
+
+func callInviteEndpoint() {
+	body := strings.NewReader(`{"start":"A2","end":"C"}`)
+	resp, err := http.Post("http://localhost:8182/invite", "application/json", body)
+	if err != nil {
+		logrus.WithError(err).Error("failed to call invite endpoint")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		logrus.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
 }
