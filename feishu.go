@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larksheets "github.com/larksuite/oapi-sdk-go/v3/service/sheets/v3"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cast"
 )
 
@@ -87,14 +85,12 @@ func GetSheets() (*larksheets.QuerySpreadsheetSheetResp, error) {
 	opts := larkcore.WithTenantAccessToken(feishuTenantAccessToken)
 	resp, err := client.Sheets.V3.SpreadsheetSheet.Query(context.Background(), req, opts)
 	if err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
 	if !resp.Success() {
 		return nil, fmt.Errorf("logId: %s, error response: \n%s", resp.RequestId(), larkcore.Prettify(resp.CodeError))
 	}
 
-	log.Println(larkcore.Prettify(resp))
 	return resp, nil
 }
 
@@ -142,7 +138,6 @@ func SheetRangeContent(start, end string) ([]Range, error) {
 	}
 	bytes, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
-	logrus.Println(larkcore.Prettify(string(bytes)))
 
 	type APIResponse struct {
 		Data struct {

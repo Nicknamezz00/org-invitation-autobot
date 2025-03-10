@@ -1,0 +1,18 @@
+###
+# curl -X POST -H 'Content-Type: application/json' 'http://localhost:8182/invite' -d '{"start":"A2","end":"C"}'
+POST http://localhost:8182/invite
+Content-Type: application/json
+
+{
+  "start": "A2",
+  "end": "C"
+}
+
+<> 2025-03-02T154700.500.txt
+<> 2025-03-02T154613.500.txt
+<> 2025-03-02T153720.200.txt
+<> 2025-03-02T153646.200.txt
+<> 2025-03-02T152319.200.txt
+
+###
+

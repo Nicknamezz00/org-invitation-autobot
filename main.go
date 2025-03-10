@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/sirupsen/logrus"
 	"github.com/robfig/cron/v3"
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
 	"github.com/Nicknamezz00/org-invitation-autobot/store"
@@ -103,15 +103,33 @@ func invite(w http.ResponseWriter, r *http.Request) {
 		orderID := content.OrderID
 		githubName := content.GithubUsername
 		githubEmail := content.GithubEmail
+
+		if isMember, err := CheckIfUserIsMember(r.Context(), githubName); err != nil {
+			logrus.WithError(err).WithFields(logrus.Fields{
+				"orderID":     orderID,
+				"githubName":  githubName,
+				"githubEmail": githubEmail,
+			}).Error("check_error")
+		} else {
+			if isMember {
+				continue
+			}
+		}
+
 		if inviteErr := InviteWrapper(r.Context(), orderID, githubName, githubEmail); inviteErr != nil {
 			logrus.WithError(inviteErr).WithFields(logrus.Fields{
 				"orderID":     orderID,
 				"githubName":  githubName,
 				"githubEmail": githubEmail,
 			}).Error("invite_error")
+		} else {
+			logrus.WithFields(logrus.Fields{
+				"orderID":     orderID,
+				"githubName":  githubName,
+				"githubEmail": githubEmail,
+			}).Info("invite_success")
 		}
 	}
-
 }
 
 func main() {
@@ -137,14 +155,20 @@ func InviteWrapper(ctx context.Context, orderID int64, username, email string) (
 		GithubEmail:      email,
 		InvitationStatus: InvitationStatusPending,
 	}
-	old, err := query.InvitationModel.WithContext(ctx).Or(
-		query.InvitationModel.GithubUsername.Eq(username),
-		query.InvitationModel.GithubEmail.Eq(email)).
+	// 最近一次未成功的
+	old, err := query.InvitationModel.WithContext(ctx).
+		Where(query.InvitationModel.InvitationStatus.Neq(InvitationStatusSucceeded)).
+		Or(query.InvitationModel.GithubUsername.Eq(username), query.InvitationModel.GithubEmail.Eq(email)).
+		Order(query.InvitationModel.UpdatedAt.Desc()).
 		First()
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) { // 没有未成功的
+			return nil
+		}
 		return fmt.Errorf("find_old_record_error||err=%v", err)
 	}
 
+	// 第一次邀请
 	if old == nil {
 		if err = query.InvitationModel.WithContext(ctx).Create(create); err != nil {
 			return fmt.Errorf("create_error||err=%v||create=%+v", err, create)
@@ -159,6 +183,9 @@ func InviteWrapper(ctx context.Context, orderID int64, username, email string) (
 	}
 
 	defer func() {
+		if errors.Is(err, ErrAlreadyInvited) {
+			err = nil
+		}
 		var (
 			cause  string
 			status = InvitationStatusSucceeded

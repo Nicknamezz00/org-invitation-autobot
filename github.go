@@ -2,13 +2,59 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
+
+type InviteResponse struct {
+	Message string `json:"message"`
+	Errors  []struct {
+		Resource string `json:"resource"`
+		Code     string `json:"code"`
+		Field    string `json:"field"`
+		Message  string `json:"message"`
+	} `json:"errors"`
+	DocumentationUrl string `json:"documentation_url"`
+	Status           string `json:"status"`
+}
+
+func CheckIfUserIsMember(ctx context.Context, username string) (bool, error) {
+	url := "https://api.github.com/orgs/Nicknamezz00-organization/members/" + username
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", githubPersonalAccessToken))
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	bytes, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return true, nil
+	case http.StatusFound:
+		return false, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("unhandled case||resp=%s||code=%v", string(bytes), resp.StatusCode)
+	}
+}
+
+var ErrAlreadyInvited = errors.New("already invited, skip")
 
 func Invite(username, email string) error {
 	url := "https://api.github.com/orgs/Nicknamezz00-organization/invitations"
@@ -35,14 +81,17 @@ func Invite(username, email string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	bytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
+
+	bytes, _ := io.ReadAll(resp.Body)
+	var r InviteResponse
+	_ = json.Unmarshal(bytes, &r)
 
 	if resp.StatusCode != http.StatusCreated {
+		if strings.Contains(r.Errors[0].Message, "already a part of this organization") {
+			logrus.Debugf("%s is already a part of this organization", username)
+			return ErrAlreadyInvited
+		}
 		return fmt.Errorf("[MUST NOTICE]||req=%+v||json=%v||code=%v||resp=%s", req, string(jsonData), resp.StatusCode, string(bytes))
 	}
-	logrus.Println(string(bytes))
 	return nil
 }
