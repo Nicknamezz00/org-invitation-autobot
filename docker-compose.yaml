@@ -1,5 +1,18 @@
-version: "3.9"
+name: auto-invite-ci
 services:
+  auto-invite:
+    build:
+      context: docker/app
+    volumes:
+      - ~/.cache/go/pkg/mod:/go/pkg/mod
+      - ./:/
+    working_dir: /
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
   postgres:
     image: postgres
     restart: always
