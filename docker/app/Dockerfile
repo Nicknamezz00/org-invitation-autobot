@@ -1,6 +1,6 @@
 FROM golang:alpine AS builder
 
-RUN mkdir -p /internal
+RUN mkdir -p /app
 COPY . /app
 WORKDIR /app
 
@@ -11,4 +11,5 @@ RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o main -ldflags="-w -s" .
 FROM alpine AS runner
 WORKDIR /app
 COPY --from=builder /app/main .
+COPY --from=builder /app/config ./config
 CMD ["./main"]

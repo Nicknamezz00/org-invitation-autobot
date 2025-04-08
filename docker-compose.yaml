@@ -12,6 +12,8 @@ services:
     depends_on:
       - postgres
     restart: unless-stopped
+    networks:
+      - auto-inv-net
 
   postgres:
     image: postgres
@@ -24,3 +26,9 @@ services:
       POSTGRES_PASSWORD: postgres
     ports:
       - "5434:5432"
+    networks:
+      - auto-inv-net
+
+networks:
+  auto-inv-net:
+    external: true
