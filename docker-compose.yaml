@@ -5,8 +5,8 @@ services:
       context: docker/app
     volumes:
       - ~/.cache/go/pkg/mod:/go/pkg/mod
-      - ./:/
-    working_dir: /
+      - ./:/app
+    working_dir: /app
     env_file:
       - .env
     depends_on:
