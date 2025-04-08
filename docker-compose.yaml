@@ -2,7 +2,8 @@ name: auto-invite-ci
 services:
   auto-invite:
     build:
-      context: docker/app
+      context: .
+      dockerfile: docker/app/Dockerfile
     volumes:
       - ~/.cache/go/pkg/mod:/go/pkg/mod
       - ./:/app
