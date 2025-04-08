@@ -1,9 +1,14 @@
-FROM golang:alpine
+FROM golang:alpine AS builder
 
-RUN go env -w GOPROXY=https://mirrors.aliyun.com/goproxy,direct
-RUN go install github.com/cespare/reflex@v0.3.1
-COPY reflex.conf /
+RUN mkdir -p /internal
+COPY . /app
+WORKDIR /app
 
-COPY start.sh /
+RUN go env -w GOPROXY=https://goproxy.cn,direct
+RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o main -ldflags="-w -s" .
 
-ENTRYPOINT ["reflex", "-c", "/reflex.conf"]
+
+FROM alpine AS runner
+WORKDIR /app
+COPY --from=builder /app/main .
+CMD ["./main"]
