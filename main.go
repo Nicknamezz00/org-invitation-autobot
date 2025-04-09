@@ -7,14 +7,16 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"reflect"
 	"strings"
+	"time"
 
+	"github.com/Nicknamezz00/org-invitation-autobot/store"
 	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
-	"github.com/Nicknamezz00/org-invitation-autobot/store"
 	"github.com/Nicknamezz00/org-invitation-autobot/store/generate/model"
 	"github.com/Nicknamezz00/org-invitation-autobot/store/generate/query"
 	"github.com/google/uuid"
@@ -44,8 +46,11 @@ func init() {
 	if err := MustGetEnvs(); err != nil {
 		logrus.Fatalln(err)
 	}
+
+	pretty := os.Getenv("IS_LOCAL") != ""
 	logrus.SetFormatter(&logrus.JSONFormatter{
-		PrettyPrint: false,
+		TimestampFormat: time.RFC3339,
+		PrettyPrint:     pretty,
 	})
 
 	viper.SetConfigFile("config/config.yaml")
@@ -54,6 +59,104 @@ func init() {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // e.g. app.port -> APP_PORT
 	if err := viper.ReadInConfig(); err != nil {
 		logrus.Fatalln(err)
+	}
+}
+
+func main() {
+	db := store.New(viper.GetViper())
+	query.SetDefault(db)
+
+	c := cron.New()
+	c.AddFunc("0 9 * * *", func() { callInviteEndpoint() })
+	c.AddFunc("0 21 * * *", func() { callInviteEndpoint() })
+	c.Start()
+	defer c.Stop()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/invite", invite)
+	mux.HandleFunc("/success", success)
+	mux.HandleFunc("/failed", failed)
+
+	server := &http.Server{
+		Addr:    ":8182",
+		Handler: mux,
+	}
+	go func() {
+		logrus.Println("HTTP Server listening :8182")
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logrus.Fatalln("Failed to start HTTP server:", err)
+		}
+	}()
+
+	// graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, os.Kill)
+
+	<-stop // 阻塞直到收到信号
+	fmt.Println("Shutting down gracefully...")
+
+	// 设置最多等待 5 秒处理未完成请求
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		fmt.Printf("Shutdown error: %v\n", err)
+	} else {
+		fmt.Println("Server shutdown complete.")
+	}
+}
+
+func success(w http.ResponseWriter, r *http.Request) {
+	var (
+		err        error
+		statusCode = http.StatusOK
+	)
+	defer func() {
+		if err != nil {
+			http.Error(w, err.Error(), statusCode)
+		}
+	}()
+	if r.Method != http.MethodGet {
+		err = errors.New("method not allowed")
+		statusCode = http.StatusMethodNotAllowed
+		return
+	}
+	all, err := query.SuccessfulInvitationModel.WithContext(r.Context()).Find()
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err = json.NewEncoder(w).Encode(all); err != nil {
+		statusCode = http.StatusInternalServerError
+		return
+	}
+}
+
+func failed(w http.ResponseWriter, r *http.Request) {
+	var (
+		err        error
+		statusCode = http.StatusOK
+	)
+	defer func() {
+		if err != nil {
+			http.Error(w, err.Error(), statusCode)
+		}
+	}()
+	if r.Method != http.MethodGet {
+		err = errors.New("method not allowed")
+		statusCode = http.StatusMethodNotAllowed
+		return
+	}
+	all, err := query.FailedInvitationModel.WithContext(r.Context()).Find()
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err = json.NewEncoder(w).Encode(all); err != nil {
+		statusCode = http.StatusInternalServerError
+		return
 	}
 }
 
@@ -130,21 +233,6 @@ func invite(w http.ResponseWriter, r *http.Request) {
 			}).Info("invite_success")
 		}
 	}
-}
-
-func main() {
-	db := store.New(viper.GetViper())
-	query.SetDefault(db)
-
-	c := cron.New()
-	c.AddFunc("0 9 * * *", func() { callInviteEndpoint() })
-	c.AddFunc("0 21 * * *", func() { callInviteEndpoint() })
-	c.Start()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/invite", invite)
-	logrus.Println("HTTP Server listening :8182")
-	logrus.Fatalln(http.ListenAndServe(":8182", mux))
 }
 
 func InviteWrapper(ctx context.Context, orderID int64, username, email string) (err error) {
