@@ -45,7 +45,7 @@ func init() {
 		logrus.Fatalln(err)
 	}
 	logrus.SetFormatter(&logrus.JSONFormatter{
-		PrettyPrint: true,
+		PrettyPrint: false,
 	})
 
 	viper.SetConfigFile("config/config.yaml")

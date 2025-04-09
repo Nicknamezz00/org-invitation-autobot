@@ -1,5 +1,5 @@
 postgres:
-  host: 'postgres'
+  host: 'localhost'
   user: 'postgres'
   password: 'postgres'
   dbname: 'postgres'
