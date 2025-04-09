@@ -9,3 +9,6 @@ run: build
 
 up:
 	docker compose -f docker-compose.yaml up -d --build
+
+free:
+	@./scripts/free_port.sh 8182

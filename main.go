@@ -198,9 +198,11 @@ func invite(w http.ResponseWriter, r *http.Request) {
 	contents, err := SheetRangeContent(rng.Start, rng.End)
 	if err != nil {
 		statusCode = http.StatusOK
-		err = fmt.Errorf("sheetRangeContent error, err=%w", err, contents)
+		err = fmt.Errorf("sheetRangeContent error, err=%w, contents=%v", err, contents)
 		return
 	}
+
+	fmt.Printf("invite::len(content)=%d", len(contents))
 
 	for _, content := range contents {
 		orderID := content.OrderID
@@ -215,6 +217,7 @@ func invite(w http.ResponseWriter, r *http.Request) {
 			}).Error("check_error")
 		} else {
 			if isMember {
+				logrus.Infof("%s is member, skip", githubName)
 				continue
 			}
 		}
