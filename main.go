@@ -224,13 +224,19 @@ func invite(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if inviteErr := InviteWrapper(r.Context(), orderID, githubName, githubEmail); inviteErr != nil {
-			failedList = append(failedList, githubName)
-			logrus.WithError(inviteErr).WithFields(logrus.Fields{
-				"orderID":     orderID,
-				"githubName":  githubName,
-				"githubEmail": githubEmail,
-			}).Error("invite_error")
+		inviteErr := InviteWrapper(r.Context(), orderID, githubName, githubEmail)
+		if inviteErr != nil {
+			if errors.Is(inviteErr, ErrAlreadyInvited) {
+				skipped = append(skipped, githubName)
+
+			} else {
+				failedList = append(failedList, githubName)
+				logrus.WithError(inviteErr).WithFields(logrus.Fields{
+					"orderID":     orderID,
+					"githubName":  githubName,
+					"githubEmail": githubEmail,
+				}).Error("invite_error")
+			}
 		} else {
 			successList = append(successList, githubName)
 			logrus.WithFields(logrus.Fields{
@@ -252,6 +258,12 @@ func invite(w http.ResponseWriter, r *http.Request) {
 }
 
 func InviteWrapper(ctx context.Context, orderID int64, username, email string) (err error) {
+	if cnt, err := query.InvitationModel.WithContext(ctx).Where(
+		query.InvitationModel.InvitationStatus.Eq(InvitationStatusSucceeded),
+		query.InvitationModel.GithubUsername.Eq(username),
+	).Count(); err == nil && cnt > 0 {
+		return ErrAlreadyInvited
+	}
 	create := &model.InvitationModel{
 		ID:               uuid.New().String(),
 		OrderID:          orderID,
