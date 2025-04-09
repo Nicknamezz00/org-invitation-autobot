@@ -4,7 +4,7 @@ export
 build:
 	go build -o main .
 
-run: build
+run: build free
 	nohup ./main > output.log 2>&1 &
 
 up:
