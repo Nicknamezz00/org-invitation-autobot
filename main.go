@@ -204,6 +204,7 @@ func invite(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("invite::len(content)=%d", len(contents))
 
+	var successList, failedList, skipped []string
 	for _, content := range contents {
 		orderID := content.OrderID
 		githubName := content.GithubUsername
@@ -218,17 +219,20 @@ func invite(w http.ResponseWriter, r *http.Request) {
 		} else {
 			if isMember {
 				logrus.Infof("%s is member, skip", githubName)
+				skipped = append(skipped, githubName)
 				continue
 			}
 		}
 
 		if inviteErr := InviteWrapper(r.Context(), orderID, githubName, githubEmail); inviteErr != nil {
+			failedList = append(failedList, githubName)
 			logrus.WithError(inviteErr).WithFields(logrus.Fields{
 				"orderID":     orderID,
 				"githubName":  githubName,
 				"githubEmail": githubEmail,
 			}).Error("invite_error")
 		} else {
+			successList = append(successList, githubName)
 			logrus.WithFields(logrus.Fields{
 				"orderID":     orderID,
 				"githubName":  githubName,
@@ -236,6 +240,15 @@ func invite(w http.ResponseWriter, r *http.Request) {
 			}).Info("invite_success")
 		}
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"skipped":     skipped,
+		"success_cnt": len(successList),
+		"successList": successList,
+		"failed_cnt":  len(failedList),
+		"failedList":  failedList,
+	})
 }
 
 func InviteWrapper(ctx context.Context, orderID int64, username, email string) (err error) {
@@ -252,10 +265,8 @@ func InviteWrapper(ctx context.Context, orderID int64, username, email string) (
 		Or(query.InvitationModel.GithubUsername.Eq(username), query.InvitationModel.GithubEmail.Eq(email)).
 		Order(query.InvitationModel.UpdatedAt.Desc()).
 		First()
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) { // 没有未成功的
-			return nil
-		}
+
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("find_old_record_error||err=%v", err)
 	}
 
